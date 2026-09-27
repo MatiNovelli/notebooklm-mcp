@@ -78,6 +78,7 @@ const PLACEHOLDER_SNIPPETS = [
   "recherche en cours",
   // Spanish
   "generando respuesta",
+  "revisando el contenido",
   "creando respuesta",
   "cargando",
   "espere por favor",
@@ -184,9 +185,10 @@ const RATE_LIMIT_MESSAGES = [
 function isPlaceholder(text: string): boolean {
   const lower = text.toLowerCase();
   if (PLACEHOLDER_SNIPPETS.some((s) => lower.includes(s))) return true;
-  // Short text ending with "..." is almost certainly a loading indicator;
-  // real responses run well past 50 chars.
-  if (text.length < 50 && text.trim().endsWith("...")) return true;
+  // Short text ending with "..." or "…" is almost certainly a loading
+  // indicator in any locale; real responses run well past 50 chars.
+  const trimmed = text.trim();
+  if (trimmed.length < 50 && /(\.\.\.|…)$/.test(trimmed)) return true;
   return false;
 }
 
