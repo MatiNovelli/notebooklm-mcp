@@ -28,10 +28,39 @@
  */
 
 export const Selectors = {
+  /**
+   * Unsolicited modals (promos, announcements) that Google mounts on page
+   * load and whose backdrop swallows every click on the notebook — e.g.
+   * `<accessibility-promo-dialog>` shipped with the Gemini Notebook rebrand.
+   * Verified 2026-09 against notebook.google.com.
+   */
+  dialogs: {
+    /** Visible CDK backdrop — present only while a modal overlay is open. */
+    backdrop: ".cdk-overlay-backdrop.cdk-overlay-backdrop-showing",
+    /** Angular component hosted inside the dialog; used for logging only. */
+    componentHost: ".mat-mdc-dialog-surface > *",
+    closeButton: [
+      // Class / attribute anchors — language-agnostic.
+      ".cdk-overlay-pane button.close-button",
+      ".cdk-overlay-pane [mat-dialog-close]",
+      // Locale-bound aria-label fallbacks.
+      '.cdk-overlay-pane button[aria-label*="close" i]',
+      '.cdk-overlay-pane button[aria-label*="cerrar" i]',
+      '.cdk-overlay-pane button[aria-label*="schließen" i]',
+      '.cdk-overlay-pane button[aria-label*="fermer" i]',
+      '.cdk-overlay-pane button[aria-label*="chiudi" i]',
+      '.cdk-overlay-pane button[aria-label*="fechar" i]',
+    ],
+  },
+
   chat: {
     answerContainer: ".to-user-container",
     answerText: ".to-user-container .message-text-content",
-    latestAnswerText: ".to-user-container:last-child .message-text-content",
+    /** One question/answer exchange; holds a user and an assistant message. */
+    turn: ".chat-message-pair",
+    questionText: ".from-user-container .message-text-content",
+    /** Collapsible "Thoughts" block rendered at the top of each answer. */
+    thinking: "thinking-chain-view",
     /**
      * Chat textarea. The class is shared across locales; aria-labels are a
      * fallback for older builds where the class was different.
@@ -122,6 +151,8 @@ export const Selectors = {
      * agnostic; aria-labels listed for older builds without the class.
      */
     addButton: [
+      // 2026-09: the class moved to the `<nb-button>` wrapper.
+      ".add-source-button button",
       "button.add-source-button",
       'button[aria-label="Add source"]',
       'button[aria-label*="add source" i]',
@@ -142,14 +173,18 @@ export const Selectors = {
      */
     overlayPane: '[role="dialog"]',
     overlayInput: '[role="dialog"] input[type="text"]:not([readonly])',
-    overlayTextarea: '[role="dialog"] textarea',
+    // Exclude the dialog's "discover sources on the web" query box, which is
+    // the first textarea on the picker screen (Gemini Notebook, 2026-09).
+    overlayTextarea: '[role="dialog"] textarea:not(.query-box-textarea)',
     /**
      * Source-type buttons in the Add-source overlay. Google ships them
      * *without* aria-labels — the only stable, language-agnostic anchor is
      * the Material-Symbols icon name baked into a `<mat-icon>` text node.
      */
     sourceTypeUrl: [
-      // Icon-anchored (language-free) — primary path.
+      // Icon-anchored (language-free) — primary path. `source-action-button`
+      // replaced `drop-zone-icon-button` in the Gemini Notebook layout.
+      'button.source-action-button:has(mat-icon:text-is("link_2"))',
       "button.drop-zone-icon-button:has(mat-icon.youtube-icon)",
       'button.drop-zone-icon-button:has(mat-icon:text-is("link"))',
       // Visible-text fallbacks for the eight major locales.
@@ -165,6 +200,7 @@ export const Selectors = {
     ],
     sourceTypeText: [
       // Icon-anchored (language-free) — primary path.
+      'button.source-action-button:has(mat-icon:text-is("content_paste"))',
       'button.drop-zone-icon-button:has(mat-icon:text-is("content_paste"))',
       // Visible-text fallbacks for major locales.
       'button.drop-zone-icon-button:has-text("Kopierter Text")',
@@ -180,11 +216,13 @@ export const Selectors = {
       '[data-type="text"]',
     ],
     sourceTypeYoutube: [
+      'button.source-action-button:has(mat-icon:text-is("video_youtube"))',
       "button.drop-zone-icon-button mat-icon.youtube-icon",
       'button.drop-zone-icon-button:has(mat-icon:text-is("video_youtube"))',
     ],
     sourceTypeFile: [
       'input[type="file"]',
+      'button.source-action-button:has(mat-icon:text-is("upload"))',
       'button.drop-zone-icon-button:has(mat-icon:text-is("upload"))',
       'button.drop-zone-icon-button:has-text("Dateien hochladen")',
       'button.drop-zone-icon-button:has-text("Upload sources")',
@@ -200,7 +238,8 @@ export const Selectors = {
      * visible-text variants are fallbacks for older builds.
      */
     insertConfirm: [
-      // Class-anchored (language-free).
+      // Class-anchored (language-free). Gemini Notebook 2026-09.
+      '[role="dialog"] button.mdc-button--unelevated',
       'button.mdc-button--raised:has-text("Insert")',
       'button.mat-flat-button:has-text("Insert")',
       'button[color="primary"]:has-text("Insert")',

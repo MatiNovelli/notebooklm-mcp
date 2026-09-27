@@ -17,8 +17,7 @@ import type { BrowserContext, Page } from "patchright";
 import type { SharedContextManager } from "./shared-context-manager.js";
 import type { AuthManager } from "../auth/auth-manager.js";
 import { humanType, randomDelay } from "../utils/stealth-utils.js";
-import { snapshotAllResponses } from "../utils/page-utils.js";
-import { waitForStableAnswer, snapshotPriorAnswers } from "../notebooklm/chat.js";
+import { waitForStableAnswer, countChatTurns } from "../notebooklm/chat.js";
 import {
   extractCitations as extractCitationsFromPage,
   type SourceFormat,
@@ -37,6 +36,7 @@ import {
   type AudioGenerationResult,
   type DownloadAudioResult,
 } from "../notebooklm/audio.js";
+import { dismissBlockingDialogs } from "../notebooklm/dialogs.js";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
 import type { SessionInfo, ProgressCallback } from "../types.js";
@@ -200,6 +200,9 @@ export class BrowserSession {
         );
       }
     }
+
+    // Promo/announcement modals mount right after load and block all clicks.
+    await dismissBlockingDialogs(this.page);
   }
 
   private isPageClosedSafe(): boolean {
@@ -381,15 +384,13 @@ export class BrowserSession {
         }
       }
 
-      // Snapshot existing responses BEFORE asking — uses the v2 chat module
-      // (issue #43). Falls back to the legacy snapshot only if the v2 helper
-      // produced nothing, so we don't regress when the new selectors miss.
-      log.info(`  📸 Snapshotting existing responses...`);
-      let existingResponses = await snapshotPriorAnswers(page);
-      if (existingResponses.length === 0) {
-        existingResponses = await snapshotAllResponses(page);
-      }
-      log.success(`  ✅ Captured ${existingResponses.length} existing responses`);
+      // Count existing chat turns BEFORE asking so only newer turns are read
+      // as the answer (chat history is persisted server-side).
+      const priorTurns = await countChatTurns(page);
+      log.info(`  📸 ${priorTurns} existing chat turns`);
+
+      // A modal may have appeared since init (or on a reused page).
+      await dismissBlockingDialogs(page);
 
       // Find the chat input
       const inputSelector = await this.findChatInput();
@@ -427,7 +428,7 @@ export class BrowserSession {
         question,
         timeoutMs: CONFIG.answerTimeoutMs,
         pollIntervalMs: 750,
-        ignoreTexts: existingResponses,
+        priorTurns,
       });
 
       if (!answer) {
@@ -490,6 +491,7 @@ export class BrowserSession {
     if (!this.initialized || !this.page || this.isPageClosedSafe()) {
       await this.init();
     }
+    await dismissBlockingDialogs(this.page!);
     return await addSourceToPage(this.page!, input);
   }
 
@@ -500,6 +502,7 @@ export class BrowserSession {
     if (!this.initialized || !this.page || this.isPageClosedSafe()) {
       await this.init();
     }
+    await dismissBlockingDialogs(this.page!);
     return await generateAudioOnPage(this.page!, options);
   }
 
@@ -520,6 +523,7 @@ export class BrowserSession {
     if (!this.initialized || !this.page || this.isPageClosedSafe()) {
       await this.init();
     }
+    await dismissBlockingDialogs(this.page!);
     return await downloadAudioOnPage(this.page!, destinationDir);
   }
 

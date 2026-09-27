@@ -9,6 +9,15 @@
  * leaks (`more_vert`, `more_horiz`, …) which would otherwise destabilise the
  * extracted text.
  *
+ * The new turn is identified structurally — the chat turns that exist after
+ * the ones counted before submitting, preferring the one whose question
+ * matches — never by comparing answer texts, so an earlier answer is never
+ * returned for a new question.
+ *
+ * All DOM reads go through a single `page.evaluate`: on current Gemini
+ * Notebook builds, patchright locator reads (`innerText`, `textContent`,
+ * `evaluate`) on the answer node time out even though the node exists.
+ *
  * Companion fixes:
  * - issue #14 / #27 — timeout is fully configurable per call
  * - issue #16    — bounded polls + sleep fallback to defuse zombie pages
@@ -16,7 +25,7 @@
  */
 
 import type { Page } from "patchright";
-import { Selectors } from "./selectors.js";
+import { Selectors, joinAlt } from "./selectors.js";
 import { isRecoverable, pageIsAlive, safeSleep } from "../browser/watchdog.js";
 
 /**
@@ -192,33 +201,95 @@ function isRateLimitText(text: string): boolean {
 }
 
 export interface AskOptions {
-  /** The question text — used to skip echo lines that NotebookLM mirrors back. */
+  /** The question text — used to pick the matching turn and skip echoes. */
   question?: string;
   /** Hard ceiling on the wait. Default 600 000 ms (10 min) — overridable per call. */
   timeoutMs?: number;
   /** Poll cadence. Default 750 ms. Lower values increase load without much benefit. */
   pollIntervalMs?: number;
-  /** Texts known *before* the question was submitted. Used to skip prior answers. */
-  ignoreTexts?: string[];
+  /** Chat turns present *before* the question was submitted (`countChatTurns`). */
+  priorTurns?: number;
   /** How many consecutive identical polls count as "answer settled". Default 3. */
   stablePolls?: number;
 }
 
-/**
- * Snapshot every visible assistant answer text *before* a new question is
- * submitted. Pass the result into `waitForStableAnswer({ ignoreTexts })` so
- * the new turn isn't confused with prior turns in the same session.
- */
-export async function snapshotPriorAnswers(page: Page): Promise<string[]> {
-  return page
-    .locator(Selectors.chat.answerText)
-    .allInnerTexts()
-    .then((texts) => texts.map((t) => t.trim()).filter(Boolean))
-    .catch(() => []);
+/** One question/answer exchange as rendered in the chat panel. */
+export interface ChatTurn {
+  question: string | null;
+  answer: string | null;
 }
 
 /**
- * Wait for the *latest* answer text to appear and stabilise.
+ * Read every chat turn in DOM order with one `page.evaluate`. Falls back to
+ * bare answer containers (no question) on layouts without turn wrappers.
+ *
+ * Answers are serialised from a detached clone rather than `innerText`:
+ * citation markers are flex buttons, so `innerText` splits them onto lines of
+ * their own ("…datos\n1\n."). The clone drops the "Thoughts" block, turns each
+ * marker into `[n]` (the form `citations.ts` formats) and keeps block breaks.
+ */
+export async function readChatTurns(page: Page): Promise<ChatTurn[]> {
+  return page.evaluate(
+    ({ turn, questionText, answerText, thinking, citation }) => {
+      const answerOf = (el: Element): string => {
+        const clone = el.cloneNode(true) as Element;
+        clone.querySelectorAll(thinking).forEach((n) => n.remove());
+        clone
+          .querySelectorAll(citation)
+          .forEach((n) => n.replaceWith(`[${(n.textContent ?? "").trim()}]`));
+        clone.querySelectorAll("br").forEach((n) => n.replaceWith("\n"));
+        clone.querySelectorAll("ul, ol").forEach((list) => {
+          list.querySelectorAll("li").forEach((li, i) => {
+            if (li.closest("ul, ol") === list)
+              li.prepend(list.tagName === "OL" ? `${i + 1}. ` : "- ");
+          });
+        });
+        clone
+          .querySelectorAll("div, p, li, h1, h2, h3, h4, h5, h6, tr")
+          .forEach((n) => n.append("\n"));
+        return clone.textContent ?? "";
+      };
+      const turns = [...document.querySelectorAll(turn)];
+      if (turns.length > 0) {
+        return turns.map((t) => {
+          const q = t.querySelector(questionText) as HTMLElement | null;
+          const a = t.querySelector(answerText);
+          return { question: q?.innerText ?? null, answer: a ? answerOf(a) : null };
+        });
+      }
+      return [...document.querySelectorAll(answerText)].map((el) => ({
+        question: null,
+        answer: answerOf(el),
+      }));
+    },
+    {
+      turn: Selectors.chat.turn,
+      questionText: Selectors.chat.questionText,
+      answerText: Selectors.chat.answerText,
+      thinking: Selectors.chat.thinking,
+      citation: joinAlt(Selectors.citations.button),
+    }
+  );
+}
+
+/**
+ * Count the chat turns *before* a new question is submitted. Pass the result
+ * into `waitForStableAnswer({ priorTurns })` so only newer turns are read.
+ */
+export async function countChatTurns(page: Page): Promise<number> {
+  return readChatTurns(page)
+    .then((turns) => turns.length)
+    .catch(() => 0);
+}
+
+/**
+ * How long to wait for a new turn whose question matches before accepting
+ * the newest new turn regardless (covers UIs that rewrite the question).
+ */
+const QUESTION_MATCH_GRACE_MS = 10_000;
+
+/**
+ * Wait for the answer to the question just submitted to appear and stabilise.
  *
  * Returns the sanitised final text, or `null` on timeout. The function never
  * throws on UI hiccups — failure surfaces as `null` so the caller can decide
@@ -232,13 +303,13 @@ export async function waitForStableAnswer(
     question = "",
     timeoutMs = 600_000,
     pollIntervalMs = 750,
-    ignoreTexts = [],
+    priorTurns = 0,
     stablePolls = 3,
   } = options;
 
-  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   const echoLower = question.trim().toLowerCase();
-  const ignoreSet = new Set(ignoreTexts.map((t) => t.trim()).filter(Boolean));
   // Hard ceiling on poll iterations defends against pathological
   // pollIntervalMs values combined with zombie-page sleep returns (issue #16).
   const maxPolls = Math.max(8, Math.ceil(timeoutMs / Math.max(50, pollIntervalMs)) + 4);
@@ -258,7 +329,10 @@ export async function waitForStableAnswer(
 
     let candidate: string | null = null;
     try {
-      candidate = await readLatestAnswer(page);
+      const turns = await readChatTurns(page);
+      const turn = pickNewTurn(turns, priorTurns, question, Date.now() - startedAt);
+      const cleaned = turn?.answer ? sanitizeAnswer(turn.answer) : "";
+      candidate = cleaned.length > 0 ? cleaned : null;
     } catch (err) {
       if (isRecoverable(err)) throw err;
       // Non-fatal extraction blip — try again next tick.
@@ -266,9 +340,8 @@ export async function waitForStableAnswer(
 
     if (candidate) {
       const isEcho = candidate.toLowerCase() === echoLower;
-      const isPrior = ignoreSet.has(candidate);
 
-      if (!isEcho && !isPrior) {
+      if (!isEcho) {
         // Loading placeholders ("Parsing the data…", "Thinking…", …) are
         // stable while Gemini is still working — the old code locked on to
         // them and returned them as the final answer. Filter them out.
@@ -304,20 +377,32 @@ export async function waitForStableAnswer(
 }
 
 /**
- * Read the latest answer container's text and strip UI-control leakage.
- * Uses `:last-child` so we always target the most recent turn.
+ * Pick the turn that answers `question` among the turns added after
+ * `priorTurns`: the newest one whose question matches, or — once the grace
+ * period is over — simply the newest one.
  */
-async function readLatestAnswer(page: Page): Promise<string | null> {
-  try {
-    const raw = await page
-      .locator(Selectors.chat.latestAnswerText)
-      .last()
-      .innerText({ timeout: 2_000 });
-    const cleaned = sanitizeAnswer(raw);
-    return cleaned.length > 0 ? cleaned : null;
-  } catch {
-    return null;
+export function pickNewTurn(
+  turns: ChatTurn[],
+  priorTurns: number,
+  question: string,
+  elapsedMs: number
+): ChatTurn | null {
+  const fresh = turns.slice(priorTurns);
+  if (fresh.length === 0) return null;
+
+  const wanted = normalizeQuestion(question);
+  if (wanted) {
+    for (let i = fresh.length - 1; i >= 0; i--) {
+      const asked = fresh[i].question;
+      if (asked !== null && normalizeQuestion(asked) === wanted) return fresh[i];
+    }
+    if (elapsedMs < QUESTION_MATCH_GRACE_MS) return null;
   }
+  return fresh[fresh.length - 1];
+}
+
+function normalizeQuestion(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 /**

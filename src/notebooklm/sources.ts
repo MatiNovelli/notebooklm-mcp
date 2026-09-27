@@ -234,14 +234,18 @@ async function pickSourceType(page: Page, type: SourceType): Promise<void> {
   const candidates =
     type === "url" ? Selectors.sources.sourceTypeUrl : Selectors.sources.sourceTypeText;
   const overlay = page.locator(Selectors.sources.overlayPane).first();
-  for (const sel of candidates) {
-    const target = overlay.locator(sel).first();
-    if (await target.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await target.click();
-      // Sub-dialog needs a moment to hydrate before we type.
-      await safeSleep(page, 500);
-      return;
-    }
+  // The dialog mounts before its picker buttons render, and `isVisible()`
+  // does not wait — so actually wait for any candidate to appear.
+  const target = overlay.locator(joinAlt(candidates)).first();
+  const found = await target
+    .waitFor({ state: "visible", timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (found) {
+    await target.click();
+    // Sub-dialog needs a moment to hydrate before we type.
+    await safeSleep(page, 500);
+    return;
   }
   // Older overlays drop straight to the input (no type picker) — that's fine.
 }
