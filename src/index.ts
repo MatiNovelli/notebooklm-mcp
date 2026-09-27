@@ -159,7 +159,6 @@ class NotebookLMMCPServer {
         capabilities: {
           tools: {},
           resources: {},
-          resourceTemplates: {},
           prompts: {},
           completions: {}, // Required for completion/complete support
           logging: {},
