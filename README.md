@@ -1,14 +1,17 @@
-> [!WARNING]
-> **This project is no longer maintained.** As of September 2026 the repository is archived: no updates, bug fixes or support. The npm package will not receive further releases. It may stop working when the upstream services change. Feel free to fork.
+> [!NOTE]
+> **This is a maintained fork** of [`PleasePrompto/notebooklm-mcp`](https://github.com/PleasePrompto/notebooklm-mcp), which was archived in September 2026. The fork keeps the server working after NotebookLM was rebranded **Gemini Notebook** and moved to `notebook.google.com`.
+>
+> The `notebooklm-mcp` package on npm is the **archived upstream release** and does not include these fixes. Until this fork is published under its own name (see [Roadmap](#roadmap)), install it [from source](#install).
 
 # NotebookLM MCP Server
 
-[![npm](https://img.shields.io/npm/v/notebooklm-mcp.svg)](https://www.npmjs.com/package/notebooklm-mcp)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Streamable--HTTP-green.svg)](https://modelcontextprotocol.io/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-MCP server for Google NotebookLM. It drives a real Chrome via Patchright (stealth + persistent fingerprint) so an agent can chat against a notebook, ingest sources, generate audio overviews, and read DOM-level citations. Two transports are supported: `stdio` (default) and Streamable-HTTP. v2.0.0 is the current line; v1 is no longer supported.
+MCP server for Google NotebookLM, now **Gemini Notebook** (`notebook.google.com`; the legacy `notebooklm.google.com` host still works). There is no official API, so it drives a real Chrome via Patchright (stealth + persistent fingerprint) so an agent can chat against a notebook, ingest sources, generate audio overviews, and read DOM-level citations. Two transports are supported: `stdio` (default) and Streamable-HTTP. v2.0.0 is the current line; v1 is no longer supported.
+
+Because it reads answers from the live web UI, it can break whenever Google changes that UI.
 
 - [Requirements](#requirements--platform-support)
 - [Install](#install)
@@ -22,6 +25,8 @@ MCP server for Google NotebookLM. It drives a real Chrome via Patchright (stealt
 - [Provenance & AI marker](#provenance--ai-marker)
 - [Configuration reference](#configuration-reference)
 - [Development](#development)
+- [Known issues](#known-issues)
+- [Roadmap](#roadmap)
 - [Migration from v1](#changelog--migration)
 
 ---
@@ -32,31 +37,36 @@ MCP server for Google NotebookLM. It drives a real Chrome via Patchright (stealt
 - **Chrome** (stable channel) preferred. The bundled Patchright Chromium is used as a fallback when Chrome refuses to launch — set `BROWSER_CHANNEL=chromium` to force it.
 - **Linux / macOS / Windows.**
 - **WSL2 + WSLg** (Windows 11+) is fully supported. WSL1 cannot launch a Chromium and is not supported — upgrade to WSL2.
-- **Headless Linux servers**: the one-time `setup_auth` needs a display because the login flow opens a visible window. Run it once under `xvfb-run` (`xvfb-run -a npx notebooklm-mcp`). After login, the persistent Chrome profile lets every subsequent run go fully headless.
+- **Headless Linux servers**: the one-time `setup_auth` needs a display because the login flow opens a visible window. Run it once under `xvfb-run` (`xvfb-run -a notebooklm-mcp`). After login, the persistent Chrome profile lets every subsequent run go fully headless.
 
 ---
 
 ## Install
 
-### Published package
+> [!IMPORTANT]
+> Do not use `notebooklm-mcp`: it downloads the archived upstream release, which fails on `notebook.google.com`.
+
+### From source + `npm link` (recommended)
 
 ```bash
-npx notebooklm-mcp@latest
-```
-
-This is the recommended path for end users. `npx` keeps the binary cached and self-updates on `@latest`.
-
-### From source
-
-```bash
-git clone https://github.com/PleasePrompto/notebooklm-mcp
+git clone https://github.com/MatiNovelli/notebooklm-mcp
 cd notebooklm-mcp
-npm install
-npm run build
-node dist/index.js
+npm install        # the prepare script runs `npm run build`
+npm link           # puts a global `notebooklm-mcp` command on your PATH
+notebooklm-mcp     # starts the server over stdio
 ```
 
-The `prepare` script also runs `npm run build`, so a fresh `npm install` produces a runnable `dist/index.js`.
+`npm link` symlinks the global command to your clone. To update, run `git pull && npm run build`; there's nothing to reinstall. `npm unlink -g notebooklm-mcp` removes the command.
+
+If you don't want a global command, run `node /absolute/path/to/notebooklm-mcp/dist/index.js` instead.
+
+### Straight from GitHub (no clone)
+
+```bash
+npx -y github:MatiNovelli/notebooklm-mcp#develop
+```
+
+npm clones the repo, installs dev dependencies and builds it on the first run. The result is cached, so pin a tag or commit (`#<tag>`, `#<sha>`) if you need reproducible installs.
 
 ---
 
@@ -65,8 +75,8 @@ The `prepare` script also runs `npm run build`, so a fresh `npm install` produce
 CLI form:
 
 ```bash
-claude mcp add notebooklm -- npx notebooklm-mcp@latest
-# or, from a local clone:
+claude mcp add notebooklm -- notebooklm-mcp
+# or, without npm link:
 claude mcp add notebooklm -- node /absolute/path/to/notebooklm-mcp/dist/index.js
 ```
 
@@ -76,14 +86,13 @@ Manual form — drop into `~/.claude.json`:
 {
   "mcpServers": {
     "notebooklm": {
-      "command": "npx",
-      "args": ["notebooklm-mcp@latest"]
+      "command": "notebooklm-mcp"
     }
   }
 }
 ```
 
-For a local build, replace `command`/`args` with `"command": "node"`, `"args": ["/absolute/path/to/dist/index.js"]`.
+Without `npm link`, use `"command": "node"`, `"args": ["/absolute/path/to/dist/index.js"]`.
 
 ---
 
@@ -95,8 +104,7 @@ For a local build, replace `command`/`args` with `"command": "node"`, `"args": [
 {
   "mcpServers": {
     "notebooklm": {
-      "command": "npx",
-      "args": ["notebooklm-mcp@latest"]
+      "command": "notebooklm-mcp"
     }
   }
 }
@@ -105,12 +113,12 @@ For a local build, replace `command`/`args` with `"command": "node"`, `"args": [
 ### Codex CLI
 
 ```bash
-codex mcp add notebooklm npx notebooklm-mcp@latest
+codex mcp add notebooklm notebooklm-mcp
 ```
 
 ### Generic MCP client (stdio)
 
-Any client that can spawn an MCP server over stdio can use the same `npx notebooklm-mcp@latest` invocation. The server speaks MCP 2025 + the SDK's `Server` capability set (`tools`, `resources`, `prompts`, `completions`, `logging`).
+Any client that can spawn an MCP server over stdio can use the same `notebooklm-mcp` command (or `node /absolute/path/to/dist/index.js`). The server speaks MCP 2025 + the SDK's `Server` capability set (`tools`, `resources`, `prompts`, `completions`, `logging`).
 
 ### HTTP-only clients (n8n, Zapier, Make, hosted agents)
 
@@ -132,7 +140,7 @@ Profile location (env-paths):
 
 Auth tools:
 
-- `setup_auth` — first-time login. Pass `show_browser=true` (default for setup) to see the window. Returns immediately after launching the window; you have up to 10 min to complete the login.
+- `setup_auth` — first-time login. Pass `show_browser=true` (default for setup) to see the window. The call **blocks until you finish logging in** (up to 10 min), even though its tool description says it returns immediately. Don't call it again while a login is in progress: it wipes the stored auth first.
 - `re_auth` — wipe stored auth and start over. Use when switching Google accounts or when authentication is broken.
 - `cleanup_data` — full cleanup with categorised preview. Pass `preserve_library=true` to keep `library.json` while wiping browser state.
 
@@ -147,15 +155,15 @@ The server speaks MCP over either stdio or Streamable-HTTP.
 ### stdio (default)
 
 ```bash
-npx notebooklm-mcp@latest
+notebooklm-mcp
 ```
 
 ### Streamable-HTTP
 
 ```bash
-npx notebooklm-mcp@latest --transport http --port 3000
+notebooklm-mcp --transport http --port 3000
 # bind to all interfaces:
-npx notebooklm-mcp@latest --transport http --port 3000 --host 0.0.0.0
+notebooklm-mcp --transport http --port 3000 --host 0.0.0.0
 ```
 
 Equivalent env vars: `NOTEBOOKLM_TRANSPORT=http`, `NOTEBOOKLM_PORT=3000`, `NOTEBOOKLM_HOST=0.0.0.0`.
@@ -180,10 +188,10 @@ Default host is `127.0.0.1`. Bind to `0.0.0.0` only when the server is reachable
 Run distinct Chrome profiles for different Google accounts:
 
 ```bash
-npx notebooklm-mcp@latest --account work
-npx notebooklm-mcp@latest --account personal
+notebooklm-mcp --account work
+notebooklm-mcp --account personal
 # or via env:
-NOTEBOOKLM_ACCOUNT=work npx notebooklm-mcp@latest
+NOTEBOOKLM_ACCOUNT=work notebooklm-mcp
 ```
 
 Each account gets its own subtree under `<dataDir>/accounts/<name>/` — separate cookies, separate `chrome_profile`, separate auth state. Account names must match `[a-z0-9][a-z0-9-_]{0,30}`. The first run for a new account requires its own `setup_auth`.
@@ -207,14 +215,15 @@ All tools below are registered in v2.0.0 and visible under the `full` profile. S
 | Tool | Purpose |
 |---|---|
 | `add_source` | Add a source to a notebook. v2 supports `type=url` (web crawl) and `type=text` (paste). Returns source counts before/after. |
-| `generate_audio` | Generate an Audio Overview. Optional `custom_prompt`, `timeout_ms` (default 600 000 ms). |
+| `generate_audio` | Start an Audio Overview. Async by default: returns `started` / `in_progress` / `ready`. Optional `custom_prompt`; `wait_for_completion=true` blocks up to `timeout_ms` (default 600 000 ms). |
+| `get_audio_status` | Poll the Audio Overview state (every ~30 s) after `generate_audio`. |
 | `download_audio` | Save the most recent Audio Overview to `destination_dir`. Run `generate_audio` first if none exists. |
 
 ### Library
 
 | Tool | Purpose |
 |---|---|
-| `add_notebook` | Add a NotebookLM share-URL to the local library with metadata. Requires explicit user confirmation. |
+| `add_notebook` | Add a notebook URL (`notebook.google.com/notebook/<id>`) to the local library with metadata. Requires explicit user confirmation. |
 | `list_notebooks` | List every notebook in the library with metadata. |
 | `get_notebook` | Fetch one notebook by `id`. |
 | `select_notebook` | Set a notebook as the active default for `ask_question`. |
@@ -259,22 +268,22 @@ Profiles trim the tool list to keep host-agent context budgets in check.
 Set the profile persistently:
 
 ```bash
-npx notebooklm-mcp config set profile minimal
-npx notebooklm-mcp config get
+notebooklm-mcp config set profile minimal
+notebooklm-mcp config get
 ```
 
 Override per-process via env var:
 
 ```bash
-NOTEBOOKLM_PROFILE=standard npx notebooklm-mcp@latest
+NOTEBOOKLM_PROFILE=standard notebooklm-mcp
 ```
 
 Disable specific tools regardless of profile:
 
 ```bash
-npx notebooklm-mcp config set disabled-tools cleanup_data,re_auth
+notebooklm-mcp config set disabled-tools cleanup_data,re_auth
 # or
-NOTEBOOKLM_DISABLED_TOOLS=cleanup_data,re_auth npx notebooklm-mcp@latest
+NOTEBOOKLM_DISABLED_TOOLS=cleanup_data,re_auth notebooklm-mcp
 ```
 
 Settings are persisted in `<configDir>/settings.json` (XDG/`%APPDATA%` location, see config.ts).
@@ -378,6 +387,8 @@ npm run check      # format:check + lint + build
 
 The build is type-safe with no `any` casts; DOM types are enabled for in-page evaluations.
 
+Some files predate the Prettier config, so `npm run check` currently fails at `format:check`. Only format the files you touch, to keep diffs reviewable. There is no test suite (`npm test` just starts the server). [`CLAUDE.md`](./CLAUDE.md) covers the architecture and how to test end to end against the live UI.
+
 Source layout:
 
 - `src/index.ts` — CLI parsing, MCP wiring, transport selection
@@ -397,6 +408,23 @@ Source layout:
 - [`docs/tools.md`](./docs/tools.md) — full per-tool schemas, examples, return shapes.
 - [`docs/troubleshooting.md`](./docs/troubleshooting.md) — common failure modes and fixes.
 - [`docs/usage-guide.md`](./docs/usage-guide.md) — end-to-end walkthroughs.
+
+---
+
+## Known issues
+
+- Tool descriptions, error messages and the provenance banner/`_provenance.model` still say "NotebookLM"/"Gemini 2.5".
+- Rate-limit messages assume daily quotas; Gemini Notebook now resets limits every 5 hours.
+- `get_health` reports `authenticated: false` once `browser_state/state.json` is older than 24 h, even when the cookies are still valid.
+- Two server processes can't share one Chrome profile, and there's no clear error when they collide. Use `--account` for parallel instances.
+- The pages under [`docs/`](./docs) still describe the upstream npm install.
+
+---
+
+## Roadmap
+
+- **Publish to npm under a scoped name** (e.g. `@matinovelli/notebooklm-mcp`) so anyone can run `npx -y @matinovelli/notebooklm-mcp@latest`. This needs `repository`/`homepage`/`bugs` in `package.json` pointed at this fork, the original author credited in `author`/`LICENSE`, a version bump and `npm publish --access public`. Once it's published, the install and connect examples above switch back to `npx`.
+- Fix the known issues above and bring `docs/` in line with this fork.
 
 ---
 
