@@ -27,6 +27,24 @@ const paths = envPaths("notebooklm-mcp", { suffix: "" });
 export const NOTEBOOKLM_AUTH_URL =
   "https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fnotebooklm.google.com%2F&flowName=GlifWebSignIn&flowEntry=ServiceLogin";
 
+/**
+ * NotebookLM hosts. Google now redirects logins (and share links) to
+ * notebook.google.com; the legacy notebooklm.google.com host is still accepted.
+ */
+const NOTEBOOKLM_HOSTS = ["notebooklm.google.com", "notebook.google.com"];
+
+/**
+ * True when `url` is an https URL on a NotebookLM host (any path).
+ */
+export function isNotebookLmUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && NOTEBOOKLM_HOSTS.includes(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export interface Config {
   // NotebookLM - optional, used for legacy default notebook
   notebookUrl: string;
