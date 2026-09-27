@@ -1,5 +1,7 @@
 # Usage Guide
 
+> Commands below assume the global `notebooklm-mcp` command from `npm link` (see the [README](../README.md#install)). Without it, use `node /absolute/path/to/dist/index.js`. Do not use `npx notebooklm-mcp@latest`: that is the archived upstream release, which fails on `notebook.google.com`.
+
 Practical end-to-end walkthroughs against v2.0.0. Each section is a self-contained recipe with the exact tool calls / curl commands.
 
 - [First-time setup](#first-time-setup)
@@ -16,14 +18,17 @@ Practical end-to-end walkthroughs against v2.0.0. Each section is a self-contain
 ### 1. Install and start
 
 ```bash
-npx notebooklm-mcp@latest
+git clone https://github.com/MatiNovelli/notebooklm-mcp
+cd notebooklm-mcp
+npm install && npm link
+notebooklm-mcp
 ```
 
 Wire it into your MCP client of choice (see the [README](../README.md#connect-to-claude-code)).
 
 ### 2. Authenticate
 
-Call `setup_auth`. A Chrome window opens. Log in to the Google account that owns the NotebookLM notebooks you want to query. Close the browser when done.
+Call `setup_auth`. A Chrome window opens. Log in to the Google account that has access to the notebooks you want to query. The call returns once the login completes (up to 10 minutes). Don't call it again while you're logging in: each call wipes the stored auth.
 
 ```json
 { "name": "setup_auth", "arguments": {} }
@@ -39,13 +44,13 @@ Expect `"authenticated": true`.
 
 ### 3. Add a notebook to the local library
 
-Get a NotebookLM share-URL: open the notebook in `notebooklm.google.com`, click _Share → Anyone with the link → Copy link_. Then:
+Open the notebook at `notebook.google.com` and copy the URL from the address bar (`https://notebook.google.com/notebook/<id>`). The logged-in account only needs access to the notebook, so there's nothing to share for your own notebooks. Legacy `notebooklm.google.com` URLs are still accepted. Then:
 
 ```json
 {
   "name": "add_notebook",
   "arguments": {
-    "url": "https://notebooklm.google.com/notebook/abcd-efgh",
+    "url": "https://notebook.google.com/notebook/abcd-efgh",
     "name": "n8n Documentation",
     "description": "n8n core docs + builtin nodes",
     "topics": ["workflow automation", "n8n", "node configuration"],
@@ -158,23 +163,32 @@ Answer text is left untouched. Citations are returned only as a structured array
 
 ## Audio Overview generation + download
 
-Two-step workflow.
+Three-step workflow: start, poll, download.
 
-### 1. Generate
+### 1. Start generation
 
 ```json
 {
   "name": "generate_audio",
   "arguments": {
-    "custom_prompt": "Focus on the migration steps and breaking changes",
-    "timeout_ms": 900000
+    "custom_prompt": "Focus on the migration steps and breaking changes"
   }
 }
 ```
 
-Generation can take several minutes — keep `timeout_ms` generous. The default is 600 000 ms (10 min).
+The call returns right away with `status: "started"`. You get `"in_progress"` if a generation was already running, and `"ready"` with `alreadyExisted: true` if the notebook already has an Audio Overview. Generation typically takes 2–10 minutes.
 
-### 2. Download
+For the old blocking behaviour, pass `"wait_for_completion": true`. The call then waits up to `timeout_ms` (default 600 000 ms).
+
+### 2. Poll
+
+```json
+{ "name": "get_audio_status", "arguments": {} }
+```
+
+Repeat every ~30 s until `status` is `"ready"`. The other values are `"in_progress"` and `"not_started"`.
+
+### 3. Download
 
 ```json
 {
@@ -185,7 +199,7 @@ Generation can take several minutes — keep `timeout_ms` generous. The default 
 }
 ```
 
-Result includes the absolute `file_path` and size in bytes.
+The result includes the absolute `filePath` of the saved `.m4a` file.
 
 If you call `download_audio` before any Audio Overview has been generated, the call returns an error pointing at `generate_audio`. Run them in order, in the same notebook.
 
@@ -197,10 +211,10 @@ Run two parallel installations against different Google accounts:
 
 ```bash
 # Terminal A: work account
-npx notebooklm-mcp@latest --account work
+notebooklm-mcp --account work
 
 # Terminal B: personal account
-npx notebooklm-mcp@latest --account personal
+notebooklm-mcp --account personal
 ```
 
 Each account gets its own Chrome profile under `<dataDir>/accounts/<name>/`. The first run for a new account requires its own `setup_auth`. Switching is just a matter of starting the server with a different `--account` flag (or `NOTEBOOKLM_ACCOUNT` env).
@@ -208,7 +222,7 @@ Each account gets its own Chrome profile under `<dataDir>/accounts/<name>/`. The
 Use cases:
 
 - Working notebooks on a corporate Google account, side-projects on a personal one.
-- Rotating between two free-tier accounts to extend the daily quota.
+- Rotating between two free-tier accounts to extend the usage limit (it resets every 5 hours).
 
 There is no shared library between accounts — each account has its own `library.json`. If you want the same library across accounts, copy `library.json` between the two `accounts/<name>/` directories manually.
 
@@ -219,7 +233,7 @@ There is no shared library between accounts — each account has its own `librar
 Start the server in HTTP mode:
 
 ```bash
-npx notebooklm-mcp@latest --transport http --port 3000 --host 0.0.0.0
+notebooklm-mcp --transport http --port 3000 --host 0.0.0.0
 ```
 
 The two operations:

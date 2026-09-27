@@ -417,14 +417,13 @@ Source layout:
 - Rate-limit messages assume daily quotas; Gemini Notebook now resets limits every 5 hours.
 - `get_health` reports `authenticated: false` once `browser_state/state.json` is older than 24 h, even when the cookies are still valid.
 - Two server processes can't share one Chrome profile, and there's no clear error when they collide. Use `--account` for parallel instances.
-- The pages under [`docs/`](./docs) still describe the upstream npm install.
 
 ---
 
 ## Roadmap
 
 - **Publish to npm under a scoped name** (e.g. `@matinovelli/notebooklm-mcp`) so anyone can run `npx -y @matinovelli/notebooklm-mcp@latest`. This needs `repository`/`homepage`/`bugs` in `package.json` pointed at this fork, the original author credited in `author`/`LICENSE`, a version bump and `npm publish --access public`. Once it's published, the install and connect examples above switch back to `npx`.
-- Fix the known issues above and bring `docs/` in line with this fork.
+- Fix the known issues above.
 
 ---
 

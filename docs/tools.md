@@ -45,7 +45,7 @@ Ask a question against a notebook. Reuses an existing browser session when `sess
   "question": "How does the OAuth refresh token rotation work?",
   "answer": "[AI-GENERATED ...] The refresh token is rotated each ...\n\nSources:\n[1] auth-spec.pdf — ...",
   "session_id": "ses_…",
-  "notebook_url": "https://notebooklm.google.com/notebook/…",
+  "notebook_url": "https://notebook.google.com/notebook/…",
   "session_info": {
     "age_seconds": 12,
     "message_count": 3,
@@ -114,14 +114,16 @@ Add a source to a notebook. v2 supports `type=url` (web crawl) and `type=text` (
 
 ## generate_audio — new in v2
 
-Generate a podcast-style Audio Overview for a notebook. Resolves when the audio element is ready.
+Start a podcast-style Audio Overview for a notebook. It is async by default: the call returns once generation is triggered, and you poll `get_audio_status` until it is ready. It is idempotent: if an Audio Overview already exists or is being generated, the call does not click again.
 
 ### Parameters
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
 | `custom_prompt` | string | no | Optional focus prompt. |
-| `timeout_ms` | number | no | Wait ceiling. Default `600000`. |
+| `wait_for_completion` | bool | no | Block until the audio is ready. Default `false`. |
+| `timeout_ms` | number | no | Wait ceiling when `wait_for_completion=true`. Default `600000`. |
+| `show_browser` | bool | no | Show the browser window for debugging. |
 | `session_id` | string | no | |
 | `notebook_id` | string | no | |
 | `notebook_url` | string | no | |
@@ -132,8 +134,7 @@ Generate a podcast-style Audio Overview for a notebook. Resolves when the audio 
 {
   "name": "generate_audio",
   "arguments": {
-    "custom_prompt": "Focus on the migration strategy",
-    "timeout_ms": 900000
+    "custom_prompt": "Focus on the migration strategy"
   }
 }
 ```
@@ -142,13 +143,46 @@ Generate a podcast-style Audio Overview for a notebook. Resolves when the audio 
 
 ```jsonc
 {
-  "status": "success",
-  "ready": true,
-  "duration_ms": 412000
+  "success": true,
+  "data": {
+    "result": {
+      "status": "started",       // "started" | "in_progress" | "ready" | "error"
+      "alreadyExisted": false,   // true when an Audio Overview already existed
+      "message": "…"             // optional
+    }
+  }
 }
 ```
 
-Pair with `download_audio` to persist the file. Video / Infographic / Slides are not in v2.0.0.
+Poll with `get_audio_status`, then persist the file with `download_audio`. Video / Infographic / Slides are not in v2.0.0.
+
+---
+
+## get_audio_status — new in v2
+
+Report the Audio Overview state without triggering anything. Safe to poll every ~30 s.
+
+### Parameters
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `show_browser` | bool | no | |
+| `session_id` | string | no | |
+| `notebook_id` | string | no | |
+| `notebook_url` | string | no | |
+
+### Return shape
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "result": {
+      "status": "in_progress"    // "ready" | "in_progress" | "not_started"
+    }
+  }
+}
+```
 
 ---
 
@@ -180,25 +214,30 @@ Download the most recent Audio Overview to disk.
 
 ```jsonc
 {
-  "status": "success",
-  "file_path": "/Users/me/Downloads/notebooklm/overview-2026-04-30.wav",
-  "size_bytes": 9_412_000
+  "success": true,
+  "data": {
+    "result": {
+      "success": true,
+      "filePath": "/Users/me/Downloads/notebooklm/Audio Overview.m4a",
+      "message": "…"             // optional
+    }
+  }
 }
 ```
 
-Run `generate_audio` first if no Audio Overview exists yet.
+Run `generate_audio` first and wait for `get_audio_status` to report `ready`.
 
 ---
 
 ## add_notebook
 
-Add a NotebookLM share-URL to the local library. The tool description enforces a confirmation workflow on the host agent — do not call without explicit user consent.
+Add a notebook URL (`https://notebook.google.com/notebook/<id>`, copied from the address bar) to the local library. The logged-in account only needs access to the notebook, and legacy `notebooklm.google.com` URLs are still accepted. The tool description enforces a confirmation workflow on the host agent — do not call without explicit user consent.
 
 ### Parameters
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `url` | string | yes | NotebookLM share URL. |
+| `url` | string | yes | Notebook URL. |
 | `name` | string | yes | Display name. |
 | `description` | string | yes | Short description of the notebook content. |
 | `topics` | string[] | yes | Topics covered. |
@@ -232,7 +271,7 @@ No parameters. Returns the full library.
     {
       "id": "nb_abcd",
       "name": "n8n Documentation",
-      "url": "https://notebooklm.google.com/notebook/…",
+      "url": "https://notebook.google.com/notebook/…",
       "description": "n8n core + builtin nodes",
       "topics": ["workflow automation", "n8n"],
       "use_cases": ["building n8n workflows"],
@@ -332,7 +371,7 @@ No parameters. Returns active sessions with age, message count, last-activity ti
 
 ## reset_session
 
-Clears chat history while keeping the same `session_id`.
+Reloads the notebook page while keeping the same `session_id`. Gemini Notebook stores chat history server-side, so the earlier turns are **not** deleted and reappear after the reload.
 
 | Name | Type | Required |
 |---|---|---|
@@ -374,7 +413,7 @@ Opens a visible Chrome for first-time Google login.
 | `show_browser` | bool | no | Default `true` for setup. |
 | `browser_options` | object | no | Same shape as `ask_question`. |
 
-Returns immediately after the window is opened. The user has up to 10 minutes to complete the login. Verify with `get_health` afterwards.
+Blocks until the login completes, up to 10 minutes, even though the tool description says it returns immediately. Calling it again while a login is in progress wipes the stored auth first. Verify with `get_health` afterwards.
 
 ---
 
